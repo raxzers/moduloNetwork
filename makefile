@@ -3,26 +3,38 @@ CXX   ?= g++
 LIBBPF_DIR ?= /usr/lib/bpf
 CFLAGS = -O2 -g -Wall -m64 -I$(LIBBPF_DIR)/include -I./src
 
-BPF_OBJS = src/net_trace.bpf.o
-USER_OBJS = src/net_trace
+BUILD_DIR := build
+SRC_DIR := src
+BPF_OBJS   = $(BUILD_DIR)/net_trace.bpf.o
+USER_OBJS  = $(BUILD_DIR)/net_trace
+VMLINUX_H  = $(SRC_DIR)/vmlinux.h
+SKEL_HDR   = $(SRC_DIR)/net_trace.skel.h
 
 all: $(USER_OBJS)
 
+# Asegurar que build/ exista
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
 # Generar vmlinux.h automáticamente
-src/vmlinux.h:
+$(VMLINUX_H): | $(BUILD_DIR)
 	bpftool btf dump file /sys/kernel/btf/vmlinux format c > $@
 
 # Compilación BPF
-src/net_trace.bpf.o: src/net_trace.bpf.c src/net_event.h src/vmlinux.h
+$(BUILD_DIR)/net_trace.bpf.o: src/net_trace.bpf.c src/net_event.h $(VMLINUX_H) | $(SRC_DIR)
 	$(CLANG) -target bpf -D__TARGET_ARCH_x86 -O2 -g -c $< -o $@
 
 # Skeleton
-src/net_trace.skel.h: src/net_trace.bpf.o
+$(SKEL_HDR): $(BUILD_DIR)/net_trace.bpf.o | $(SRC_DIR)
 	bpftool gen skeleton $< > $@
 
 # User space
-src/net_trace: src/net_trace.cpp src/net_trace.skel.h
+$(USER_OBJS): src/net_trace.cpp $(SKEL_HDR) | $(BUILD_DIR)
 	$(CXX) $(CFLAGS) -o $@ $< -lbpf
 
 clean:
-	rm -f src/*.o src/*.skel.h src/net_trace src/vmlinux.h
+	rm -rf $(BUILD_DIR)
+	rm -f  src/*.skel.h src/vmlinux.h
+
+run:
+	sudo ./build/net_trace

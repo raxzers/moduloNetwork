@@ -4,16 +4,18 @@
 #include <stdint.h>  // estándar C, funciona en C y C++
 
 struct net_event {
-    uint64_t ts;        // timestamp
-    uint32_t pid;       // PID del proceso
-    char comm[16];      // nombre del proceso
-    uint32_t saddr;     // IP origen (IPv4)
-    uint32_t daddr;     // IP destino (IPv4)
-    uint16_t sport;     // puerto origen
-    uint16_t dport;     // puerto destino
-    uint64_t bytes;     // número de bytes transferidos
-    uint8_t  direction; // 0 = recv, 1 = send
-    uint8_t  protocol;  // 6 = TCP, 17 = UDP
+    __u64 ts;
+    __u32 pid;
+    char comm[16];
+    __u32 saddr;
+    __u32 daddr;
+    __u16 sport;
+    __u16 dport;
+    __u64 bytes;
+    __u64 volume;
+    __u64 bw;
+    __u32 ifindex;
+    __u8  direction;
+    __u8  protocol;
 };
-
 #endif /* __NET_EVENT_H */
