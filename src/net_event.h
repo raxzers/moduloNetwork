@@ -17,7 +17,6 @@ struct net_event {
     __u32 ifindex;
     __u8  direction;
     __u8  protocol;
-    char ifname[16];
-
+    
 };
 #endif /* __NET_EVENT_H */

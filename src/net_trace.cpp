@@ -14,10 +14,6 @@
 #include <iostream>
 #include <iomanip>
 
-
-
-
-
 static volatile bool running = true;
 
 static void sig_handler(int signo) {
@@ -76,6 +72,10 @@ void load_interfaces() {
 static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
    struct net_event *e = (struct net_event *) data;
 
+
+
+    
+
     char keybuf[64];
     snprintf(keybuf, sizeof(keybuf), "%s:%d", e->comm, e->pid);
     std::string key(keybuf);
@@ -87,7 +87,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
     auto &st = proc_table[key];
 
     // actualizar acumulados primero
-    if (e->direction)
+    if (e->direction!=0)
         st.s_bytes += e->bytes;  // OUT
     else
         st.r_bytes += e->bytes;  // IN
@@ -108,7 +108,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
     }
 
     // imprimir antes de actualizar snapshots
-    printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu %s) proto=%s %s:%d -> %s:%d\n",
+    printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu direct=%d) proto=%s %s:%d -> %s:%d\n",
            e->ts,
            key.c_str(),
            st.r_bytes,
@@ -116,10 +116,14 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
            r_rate,
            s_rate,
            e->bytes,
-           e->direction ? "OUT" : "IN",
+           e->direction ,
            e->protocol == IPPROTO_TCP ? "TCP" : "UDP",
            inet_ntoa(*(struct in_addr*)&e->saddr), e->sport,
            inet_ntoa(*(struct in_addr*)&e->daddr), e->dport);
+
+    //printf("direction=%u protocol=%u\n", e->direction, e->protocol);
+
+
 
     // ahora sí: actualizar snapshots
     st.last_r_bytes = st.r_bytes;
