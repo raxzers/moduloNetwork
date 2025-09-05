@@ -11,8 +11,14 @@
 
 #include <map>
 #include <string>
-#include <iostream>
+
 #include <iomanip>
+#include <unistd.h>
+#include <netinet/in.h>
+
+
+
+
 
 static volatile bool running = true;
 
@@ -30,7 +36,60 @@ struct ProcStats {
 
 static std::map<std::string, ProcStats> proc_table;
     // Mapa global ifindex → nombre
-static std::unordered_map<int, std::string> ifindex_to_name;
+
+
+std::string getActiveInterfaceName() {
+    // 1. Creamos socket UDP
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) return "";
+
+    sockaddr_in remoteAddr{};
+    remoteAddr.sin_family = AF_INET;
+    remoteAddr.sin_port = htons(53); // puerto DNS
+    inet_pton(AF_INET, "8.8.8.8", &remoteAddr.sin_addr);
+
+    if (connect(sock, (struct sockaddr*)&remoteAddr, sizeof(remoteAddr)) < 0) {
+        close(sock);
+        return "";
+    }
+
+    sockaddr_in localAddr{};
+    socklen_t addrLen = sizeof(localAddr);
+    if (getsockname(sock, (struct sockaddr*)&localAddr, &addrLen) < 0) {
+        close(sock);
+        return "";
+    }
+
+    close(sock);
+
+    // 2. Mapear IP local a interfaz usando getifaddrs
+    struct ifaddrs *ifaddr, *ifa;
+    if (getifaddrs(&ifaddr) == -1) return "";
+
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &localAddr.sin_addr, ip, sizeof(ip));
+
+    std::string ifaceName = "";
+
+    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) continue;
+        if (ifa->ifa_addr->sa_family != AF_INET) continue;
+
+        char addr[INET_ADDRSTRLEN];
+        sockaddr_in *sa = (sockaddr_in*)ifa->ifa_addr;
+        inet_ntop(AF_INET, &sa->sin_addr, addr, sizeof(addr));
+
+        if (strcmp(addr, ip) == 0) {
+            ifaceName = ifa->ifa_name;
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
+    return ifaceName;
+}
+
+
 
 static void print_summary() {
     std::cout << "\n==== Trafico acumulado por proceso ====\n";
@@ -47,33 +106,13 @@ static void print_summary() {
 }
 
 
-// Construir el mapa con getifaddrs()
-void load_interfaces() {
-    struct ifaddrs *ifaddr, *ifa;
-    if (getifaddrs(&ifaddr) == -1) {
-        perror("getifaddrs");
-        return;
-    }
 
-    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_name)
-            continue;
-
-        int idx = if_nametoindex(ifa->ifa_name);
-        if (idx > 0) {
-            ifindex_to_name[idx] = ifa->ifa_name;
-        }
-    }
-
-    freeifaddrs(ifaddr);
-}
 
 
 static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
    struct net_event *e = (struct net_event *) data;
 
-
-
+    std::string iface=    getActiveInterfaceName();
     
 
     char keybuf[64];
@@ -108,7 +147,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
     }
 
     // imprimir antes de actualizar snapshots
-    printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu direct=%d) proto=%s %s:%d -> %s:%d\n",
+    printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu direct=%d) proto=%s iface=%s %s:%d -> %s:%d\n",
            e->ts,
            key.c_str(),
            st.r_bytes,
@@ -118,6 +157,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
            e->bytes,
            e->direction ,
            e->protocol == IPPROTO_TCP ? "TCP" : "UDP",
+           iface.c_str(),
            inet_ntoa(*(struct in_addr*)&e->saddr), e->sport,
            inet_ntoa(*(struct in_addr*)&e->daddr), e->dport);
 
@@ -141,7 +181,7 @@ static void handle_lost(void *ctx, int cpu, __u64 lost_cnt) {
 
 int main() {
     signal(SIGINT, sig_handler);
-    load_interfaces();
+    
     struct net_trace_bpf *skel = net_trace_bpf__open_and_load();
     if (!skel) {
         std::cerr << "Failed to open/load skeleton\n";
