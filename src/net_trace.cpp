@@ -26,6 +26,18 @@ static void sig_handler(int signo) {
     running = false;
 }
 
+
+struct Stats {
+    unsigned long long recv_bytes_window = 0;
+    unsigned long long sent_bytes_window = 0;
+    char comm[16]; // nombre del proceso
+};
+
+static std::map<int, Stats> process_BW;
+static unsigned long long window_start_ts = 0;
+const unsigned long long WINDOW_NS = 5ull * 1000000000ull; // ventana de 5 segundos
+
+
 struct ProcStats {
     unsigned long long r_bytes;    
     unsigned long long s_bytes;    
@@ -89,7 +101,26 @@ std::string getActiveInterfaceName() {
     return ifaceName;
 }
 
+static void print_bandwidth(unsigned long long now_ts) {
+    double elapsed_sec = (now_ts - window_start_ts) / 1e9;
 
+    printf("\n=== Ventana de %.2f segundos ===\n", elapsed_sec);
+    for (auto &kv : process_BW) {
+        int pid = kv.first;
+        Stats &s = kv.second;
+        double in_rate = s.recv_bytes_window / elapsed_sec;
+        double out_rate = s.sent_bytes_window / elapsed_sec;
+
+        printf("PID=%d  COMM=%s  RECV=%.2f B/s  SENT=%.2f B/s  (Total %llu IN, %llu OUT)\n",
+               pid, s.comm, in_rate, out_rate,
+               s.recv_bytes_window, s.sent_bytes_window);
+    }
+    printf("=================================\n\n");
+
+    // resetear stats
+    process_BW.clear();
+    window_start_ts = now_ts;
+}
 
 static void print_summary() {
     std::cout << "\n==== Trafico acumulado por proceso ====\n";
@@ -105,17 +136,8 @@ static void print_summary() {
     }
 }
 
-
-
-
-
-static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
-   struct net_event *e = (struct net_event *) data;
-
-    std::string iface=    getActiveInterfaceName();
-    
-
-    char keybuf[64];
+static void print_process(net_event* e) {
+char keybuf[64];
     snprintf(keybuf, sizeof(keybuf), "%s:%d", e->comm, e->pid);
     std::string key(keybuf);
 
@@ -145,7 +167,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
             s_rate = delta_s / delta_sec;
         }
     }
-
+    std::string iface=getActiveInterfaceName();
     // imprimir antes de actualizar snapshots
     printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu direct=%d) proto=%s iface=%s %s:%d -> %s:%d\n",
            e->ts,
@@ -169,7 +191,38 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
     st.last_r_bytes = st.r_bytes;
     st.last_s_bytes = st.s_bytes;
     st.last_ts      = e->ts;
+}
 
+
+
+static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
+   struct net_event *e = (struct net_event *) data;
+
+    
+    //print_process(e);
+
+    
+
+
+        //ancho de banda
+    if (window_start_ts == 0)
+            window_start_ts = e->ts;
+
+        // Acumular bytes por proceso
+        Stats &bw = process_BW[e->pid];
+        bw.comm[sizeof(bw.comm)-1] = '\0'; // asegurar terminador
+        strncpy(bw.comm, e->comm, sizeof(bw.comm)-1);
+
+        if (e->direction == 0) {
+            bw.recv_bytes_window += e->bytes;
+        } else {
+            bw.sent_bytes_window += e->bytes;
+        }
+
+        // Revisar si se venció la ventana
+        if (e->ts - window_start_ts >= WINDOW_NS) {
+            print_bandwidth(e->ts);
+        }
     
 
 }
