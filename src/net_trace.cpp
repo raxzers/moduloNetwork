@@ -136,16 +136,8 @@ static void print_summary() {
     }
 }
 
-static void print_process(net_event* e) {
-char keybuf[64];
-    snprintf(keybuf, sizeof(keybuf), "%s:%d", e->comm, e->pid);
-    std::string key(keybuf);
+static void print_process(net_event* e, ProcStats &st,std::string key) {
 
-    if (proc_table.find(key) == proc_table.end()) {
-        proc_table[key] = {0, 0, 0, 0, 0};
-    }
-
-    auto &st = proc_table[key];
 
     // actualizar acumulados primero
     if (e->direction!=0)
@@ -199,7 +191,18 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
    struct net_event *e = (struct net_event *) data;
 
     
-    //print_process(e);
+    char keybuf[64];
+    snprintf(keybuf, sizeof(keybuf), "%s:%d", e->comm, e->pid);
+    std::string key(keybuf);
+
+    if (proc_table.find(key) == proc_table.end()) {
+        proc_table[key] = {0, 0, 0, 0, 0};
+    }
+
+    auto &st = proc_table[key];
+
+
+    //print_process(e,st,key);
 
     
 
