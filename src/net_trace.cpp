@@ -139,11 +139,7 @@ static void print_summary() {
 static void print_process(net_event* e, ProcStats &st,std::string key) {
 
 
-    // actualizar acumulados primero
-    if (e->direction!=0)
-        st.s_bytes += e->bytes;  // OUT
-    else
-        st.r_bytes += e->bytes;  // IN
+
 
     double r_rate = 0.0, s_rate = 0.0;
 
@@ -179,10 +175,8 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
 
 
 
-    // ahora sí: actualizar snapshots
-    st.last_r_bytes = st.r_bytes;
-    st.last_s_bytes = st.s_bytes;
-    st.last_ts      = e->ts;
+
+    
 }
 
 
@@ -200,6 +194,13 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
     }
 
     auto &st = proc_table[key];
+
+        // actualizar acumulados primero
+    if (e->direction!=0)
+        st.s_bytes += e->bytes;  // OUT
+    else
+        st.r_bytes += e->bytes;  // IN
+
 
 
     //print_process(e,st,key);
@@ -227,7 +228,9 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
             print_bandwidth(e->ts);
         }
     
-
+    st.last_r_bytes = st.r_bytes;
+    st.last_s_bytes = st.s_bytes;
+    st.last_ts      = e->ts;
 }
 
 
