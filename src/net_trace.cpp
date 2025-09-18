@@ -16,7 +16,8 @@
 #include <unistd.h>
 #include <netinet/in.h>
 
-
+#include <thread>
+#include <chrono>
 
 
 
@@ -26,6 +27,18 @@ static void sig_handler(int signo) {
     running = false;
 }
 
+enum Mode { MODE_EVENTS, MODE_BANDWIDTH };
+Mode mode = MODE_EVENTS;
+
+
+Mode parse_mode(int argc, char **argv) {
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "mode=bandwidth") return MODE_BANDWIDTH;
+        if (arg == "mode=events") return MODE_EVENTS;
+    }
+    return MODE_EVENTS; // por defecto
+}
 
 struct Stats {
     unsigned long long recv_bytes_window = 0;
@@ -35,16 +48,18 @@ struct Stats {
 
 static std::map<int, Stats> process_BW;
 static unsigned long long window_start_ts = 0;
-const unsigned long long WINDOW_NS = 5ull * 1000000000ull; // ventana de 5 segundos
+
 
 
 struct ProcStats {
-    unsigned long long r_bytes;    
-    unsigned long long s_bytes;    
-    unsigned long long last_r_bytes;
-    unsigned long long last_s_bytes;
-    unsigned long long last_ts;
+    unsigned long long r_bytes= 0;    
+    unsigned long long s_bytes= 0;    
+    unsigned long long last_r_bytes= 0;
+    unsigned long long last_s_bytes= 0;
+    unsigned long long last_ts = 0;
 };
+
+
 
 static std::map<std::string, ProcStats> proc_table;
     // Mapa global ifindex → nombre
@@ -179,6 +194,22 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
     
 }
 
+void stats_loop() {
+    using clock = std::chrono::steady_clock;
+    auto start = clock::now();
+    auto next = start;
+
+    while (true) {
+        next += std::chrono::seconds(5);
+        std::this_thread::sleep_until(next);
+
+        unsigned long long ts = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    next.time_since_epoch()).count();
+
+        print_bandwidth(ts);
+    }
+}
+
 
 
 static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
@@ -203,13 +234,14 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
 
 
 
-    //print_process(e,st,key);
+    //
 
-    
-
-
-        //ancho de banda
-    if (window_start_ts == 0)
+     if (mode == MODE_EVENTS) {
+        // imprimir cada evento
+        print_process(e,st,key);
+    } else {
+        // en modo bandwidth solo acumulas
+        if (window_start_ts == 0)
             window_start_ts = e->ts;
 
         // Acumular bytes por proceso
@@ -222,11 +254,16 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
         } else {
             bw.sent_bytes_window += e->bytes;
         }
+    }
 
+    
+        //ancho de banda
+    
+        /*
         // Revisar si se venció la ventana
         if (e->ts - window_start_ts >= WINDOW_NS) {
             print_bandwidth(e->ts);
-        }
+        }*/
     
     st.last_r_bytes = st.r_bytes;
     st.last_s_bytes = st.s_bytes;
@@ -238,7 +275,7 @@ static void handle_lost(void *ctx, int cpu, __u64 lost_cnt) {
     std::cerr << "Lost " << lost_cnt << " events on CPU " << cpu << std::endl;
 }
 
-int main() {
+int main(int argc, char **argv) {
     signal(SIGINT, sig_handler);
     
     struct net_trace_bpf *skel = net_trace_bpf__open_and_load();
@@ -253,7 +290,11 @@ int main() {
         return 1;
     }
 
-    
+    mode = parse_mode(argc, argv);
+
+    if (mode == MODE_BANDWIDTH) {
+        std::thread(stats_loop).detach();
+    }
 
     struct perf_buffer *pb = perf_buffer__new(bpf_map__fd(skel->maps.events),
                                               8, handle_event, handle_lost, nullptr, nullptr);
@@ -266,6 +307,7 @@ int main() {
     std::cout << "Tracing... Press Ctrl+C to stop\n";
 
     while (running) {
+        
         perf_buffer__poll(pb, 100);
     }
     print_summary();

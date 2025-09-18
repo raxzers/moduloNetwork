@@ -161,26 +161,3 @@ int BPF_KPROBE(trace_udp_recvmsg, struct sock *sk, struct msghdr *msg, size_t si
 }
 
 
-/*
-// Tracepoint net_dev_queue: captura interfaz y bytes
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __uint(max_entries, 10);
-    __type(key, __u32);
-    __type(value, char[16]);
-} ifnames SEC(".maps");
-
-SEC("xdp")
-int xdp_prog(struct xdp_md *ctx) {
-    struct net_event ev = {};
-    ev.ts = bpf_ktime_get_ns();
-    ev.bytes = (__u64)(ctx->data_end - ctx->data);
-    ev.ifindex = ctx->ingress_ifindex;
-
-    char *name = bpf_map_lookup_elem(&ifnames, &ev.ifindex);
-    if (name)
-        __builtin_memcpy(ev.ifname, name, 16);
-
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &ev, sizeof(ev));
-    return XDP_PASS;
-}*/

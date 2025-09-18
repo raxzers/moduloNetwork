@@ -36,5 +36,8 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f  src/*.skel.h src/vmlinux.h
 
-run:
-	sudo ./build/net_trace
+run :
+	sudo ./build/net_trace mode=events
+
+runBW :
+	sudo ./build/net_trace mode=bandwidth
