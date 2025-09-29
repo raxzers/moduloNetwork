@@ -56,6 +56,8 @@ struct ProcStats {
     unsigned long long s_bytes= 0;    
     unsigned long long last_r_bytes= 0;
     unsigned long long last_s_bytes= 0;
+    unsigned long long total_r_bytes= 0;
+    unsigned long long total_s_bytes= 0;
     unsigned long long last_ts = 0;
 };
 
@@ -146,16 +148,12 @@ static void print_summary() {
 
     for (auto &p : proc_table) {
         std::cout << std::left << std::setw(20) << p.first
-                  << std::right << std::setw(15) << p.second.r_bytes
-                  << std::setw(15) << p.second.s_bytes << "\n";
+                  << std::right << std::setw(15) << p.second.total_r_bytes
+                  << std::setw(15) << p.second.total_s_bytes << "\n";
     }
 }
 
 static void print_process(net_event* e, ProcStats &st,std::string key) {
-
-
-
-
     double r_rate = 0.0, s_rate = 0.0;
 
     if (st.last_ts != 0) {
@@ -163,24 +161,23 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
         if (delta_ts > 0) {
             double delta_sec = delta_ts / 1e9;
 
-            unsigned long long delta_r = st.r_bytes - st.last_r_bytes;
-            unsigned long long delta_s = st.s_bytes - st.last_s_bytes;
-
-            r_rate = delta_r / delta_sec;
-            s_rate = delta_s / delta_sec;
+            r_rate = ((double)st.r_bytes / delta_sec)*1000;
+            s_rate = ((double)st.s_bytes / delta_sec)*1000;
         }
     }
+    st.last_ts = e->ts;
     std::string iface=getActiveInterfaceName();
     // imprimir antes de actualizar snapshots
-    printf("[%llu] %-20s Recv=%llu  Sent=%llu  Rate: IN=%.2f B/us OUT=%.2f B/us (last=%llu direct=%d) proto=%s iface=%s %s:%d -> %s:%d\n",
+    printf("[%llu] %-20s Recv=%llu Sent=%llu Rate: IN=%.2f B/us OUT=%.2f B/us (built-upR=%llu built-upS=%llu %s) proto=%s iface=%s %s:%d -> %s:%d\n",
            e->ts,
            key.c_str(),
            st.r_bytes,
            st.s_bytes,
            r_rate,
            s_rate,
-           e->bytes,
-           e->direction ,
+           st.last_r_bytes,
+           st.last_s_bytes,
+           e->direction ? "OUT" : "IN",
            e->protocol == IPPROTO_TCP ? "TCP" : "UDP",
            iface.c_str(),
            inet_ntoa(*(struct in_addr*)&e->saddr), e->sport,
@@ -213,62 +210,57 @@ void stats_loop() {
 
 
 static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
-   struct net_event *e = (struct net_event *) data;
+    struct net_event *e = (struct net_event *) data;
 
-    
     char keybuf[64];
     snprintf(keybuf, sizeof(keybuf), "%s:%d", e->comm, e->pid);
     std::string key(keybuf);
 
     if (proc_table.find(key) == proc_table.end()) {
-        proc_table[key] = {0, 0, 0, 0, 0};
+        proc_table[key] = {0, 0, 0, 0, 0}; // inicializa en cero
     }
 
     auto &st = proc_table[key];
+    unsigned long long delta = 0;
 
-        // actualizar acumulados primero
-    if (e->direction!=0)
-        st.s_bytes += e->bytes;  // OUT
-    else
-        st.r_bytes += e->bytes;  // IN
-
-
-
-    //
-
-     if (mode == MODE_EVENTS) {
-        // imprimir cada evento
-        print_process(e,st,key);
-    } else {
-        // en modo bandwidth solo acumulas
-        if (window_start_ts == 0)
-            window_start_ts = e->ts;
-
-        // Acumular bytes por proceso
-        Stats &bw = process_BW[e->pid];
-        bw.comm[sizeof(bw.comm)-1] = '\0'; // asegurar terminador
-        strncpy(bw.comm, e->comm, sizeof(bw.comm)-1);
-
-        if (e->direction == 0) {
-            bw.recv_bytes_window += e->bytes;
+    if (e->direction != 0) { // OUT
+        if (st.last_s_bytes > 0 && e->bytes >= st.last_s_bytes) {
+            delta = e->bytes - st.last_s_bytes;
+            st.total_s_bytes += delta;
         } else {
-            bw.sent_bytes_window += e->bytes;
+            delta = 0; // evitar underflow
         }
+        st.s_bytes = delta;
+        st.last_s_bytes = e->bytes;
+    } else { // IN
+        if (st.last_r_bytes > 0 && e->bytes >= st.last_r_bytes) {
+            delta = e->bytes - st.last_r_bytes;
+            st.total_r_bytes += delta;
+        } else {
+            delta = 0;
+        }
+        st.r_bytes = delta;
+        st.last_r_bytes = e->bytes;
     }
 
-    
-        //ancho de banda
-    
-        /*
-        // Revisar si se venció la ventana
-        if (e->ts - window_start_ts >= WINDOW_NS) {
-            print_bandwidth(e->ts);
-        }*/
-    
-    st.last_r_bytes = st.r_bytes;
-    st.last_s_bytes = st.s_bytes;
-    st.last_ts      = e->ts;
+    st.last_ts = e->ts;
+
+    if (mode == MODE_EVENTS) {
+        print_process(e,st,key);
+    } else {
+        Stats &bw = process_BW[e->pid];
+        bw.comm[sizeof(bw.comm)-1] = '\0';
+        strncpy(bw.comm, e->comm, sizeof(bw.comm)-1);
+
+        if (e->direction == 0)
+            bw.recv_bytes_window += delta;  // solo sumar delta
+        else
+            bw.sent_bytes_window += delta;
+    }
 }
+
+
+
 
 
 static void handle_lost(void *ctx, int cpu, __u64 lost_cnt) {
