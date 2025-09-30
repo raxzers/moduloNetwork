@@ -58,6 +58,8 @@ struct ProcStats {
     unsigned long long last_s_bytes= 0;
     unsigned long long total_r_bytes= 0;
     unsigned long long total_s_bytes= 0;
+    unsigned long long last_r_delta= 0;
+    unsigned long long last_s_delta = 0;
     unsigned long long last_ts = 0;
 };
 
@@ -66,6 +68,13 @@ struct ProcStats {
 static std::map<std::string, ProcStats> proc_table;
     // Mapa global ifindex → nombre
 
+struct LastSample {
+    unsigned long long ts;       // último timestamp
+    unsigned long long r_bytes;  // último recibido
+    unsigned long long s_bytes;  // último enviado
+};
+
+std::unordered_map<int, LastSample> last_sample;
 
 std::string getActiveInterfaceName() {
     // 1. Creamos socket UDP
@@ -154,29 +163,45 @@ static void print_summary() {
 }
 
 static void print_process(net_event* e, ProcStats &st,std::string key) {
+
+
+    long long delta_r = 0, delta_s = 0;
     double r_rate = 0.0, s_rate = 0.0;
 
-    if (st.last_ts != 0) {
-        unsigned long long delta_ts = e->ts - st.last_ts;
+    auto it = last_sample.find(e->pid);
+    if (it != last_sample.end()) {
+        auto prev = it->second;
+
+        unsigned long long delta_ts = st.last_ts - prev.ts;
         if (delta_ts > 0) {
+            delta_r = (long long)st.r_bytes - (long long)prev.r_bytes;
+            delta_s = (long long)st.s_bytes - (long long)prev.s_bytes;
+
             double delta_sec = delta_ts / 1e9;
 
-            r_rate = ((double)st.r_bytes / delta_sec)*1000;
-            s_rate = ((double)st.s_bytes / delta_sec)*1000;
+            r_rate = (double)delta_r / delta_sec;
+            s_rate = (double)delta_s / delta_sec;
         }
     }
-    st.last_ts = e->ts;
+    // actualizar muestra actual
+    last_sample[e->pid] = {st.last_ts, st.r_bytes, st.s_bytes};
+
+    /*printf("[%llu] pid=%d Recv=%llu Sent=%llu Rate IN=%.2f B/s OUT=%.2f B/s\n",
+           st.last_ts, e->pid, st.r_bytes, st.s_bytes, r_rate, s_rate);*/
+    
+    
+
     std::string iface=getActiveInterfaceName();
     // imprimir antes de actualizar snapshots
-    printf("[%llu] %-20s Recv=%llu Sent=%llu Rate: IN=%.2f B/us OUT=%.2f B/us (built-upR=%llu built-upS=%llu %s) proto=%s iface=%s %s:%d -> %s:%d\n",
+    printf("[%llu] %-20s Recv=%llu Sent=%llu Rate: IN=%.2f B/ns OUT=%.2f B/s (built-upR=%llu built-upS=%llu %s) proto=%s iface=%s %s:%d -> %s:%d\n",
            e->ts,
            key.c_str(),
            st.r_bytes,
            st.s_bytes,
            r_rate,
            s_rate,
-           st.last_r_bytes,
-           st.last_s_bytes,
+           st.total_r_bytes,
+           st.total_s_bytes,
            e->direction ? "OUT" : "IN",
            e->protocol == IPPROTO_TCP ? "TCP" : "UDP",
            iface.c_str(),
