@@ -11,14 +11,18 @@
 
 #include <map>
 #include <string>
-
 #include <iomanip>
+
 #include <unistd.h>
 #include <netinet/in.h>
-
+#include <fstream>
+#include <ctime>
 #include <thread>
 #include <chrono>
 
+
+
+#include <sstream>
 
 
 static volatile bool running = true;
@@ -63,7 +67,21 @@ struct ProcStats {
     unsigned long long last_ts = 0;
 };
 
+std::ofstream csv_file;
+bool csv_initialized = false;
 
+void init_csv() {
+    if (csv_initialized) return;
+
+    time_t now = time(nullptr);
+    struct tm *lt = localtime(&now);
+    char filename[64];
+    strftime(filename, sizeof(filename), "build/measurements_%Y%m%d_%H%M.csv", lt);
+    csv_file << std::fixed << std::setprecision(0);
+    csv_file.open(filename);
+    csv_file << "timestamp,pid,process,recv_bytes,sent_bytes,recv_rate,sent_rate,protocol,iface,src_ip,src_port,dst_ip,dst_port\n";
+    csv_initialized = true;
+}
 
 static std::map<std::string, ProcStats> proc_table;
     // Mapa global ifindex → nombre
@@ -149,21 +167,48 @@ static void print_bandwidth(unsigned long long now_ts) {
 }
 
 static void print_summary() {
-    std::cout << "\n==== Trafico acumulado por proceso ====\n";
-    std::cout << std::left << std::setw(20) << "Proceso"
-              << std::right << std::setw(15) << "Recv (bytes)"
-              << std::setw(15) << "Sent (bytes)" << "\n";
-    std::cout << "---------------------------------------------\n";
+        // Crear nombre de archivo con fecha/hora
+    time_t now = time(nullptr);
+    struct tm *lt = localtime(&now);
+    std::ostringstream filename;
+    filename << "build/report"
+             << std::put_time(lt, "%Y%m%d_%H%M")
+             << ".txt";
 
-    for (auto &p : proc_table) {
-        std::cout << std::left << std::setw(20) << p.first
-                  << std::right << std::setw(15) << p.second.total_r_bytes
-                  << std::setw(15) << p.second.total_s_bytes << "\n";
+    // Abrir archivo en modo escritura
+    std::ofstream report(filename.str());
+    if (!report.is_open()) {
+        std::cerr << "Error al crear " << filename.str() << "\n";
+        return;
     }
+
+    // Encabezado
+    std::ostringstream output;
+    output << "\n==== Trafico acumulado por proceso ====\n";
+    output << std::left << std::setw(20) << "Proceso"
+           << std::right << std::setw(15) << "Recv (bytes)"
+           << std::setw(15) << "Sent (bytes)" << "\n";
+    output << "---------------------------------------------\n";
+
+    // Cuerpo de datos
+    for (auto &p : proc_table) {
+        output << std::left << std::setw(20) << p.first
+               << std::right << std::setw(15) << p.second.total_r_bytes
+               << std::setw(15) << p.second.total_s_bytes << "\n";
+    }
+
+    // Mostrar en consola
+    std::cout << output.str();
+
+    // Escribir al archivo .txt
+    report << output.str();
+    report.close();
+
+    std::cout << "\nResumen guardado en " << filename.str() << "\n";
 }
 
 static void print_process(net_event* e, ProcStats &st,std::string key) {
-
+    init_csv();
 
     long long delta_r = 0, delta_s = 0;
     double r_rate = 0.0, s_rate = 0.0;
@@ -209,8 +254,28 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
            inet_ntoa(*(struct in_addr*)&e->daddr), e->dport);
 
     //printf("direction=%u protocol=%u\n", e->direction, e->protocol);
+    // Guardar en CSV
+        if (csv_file.is_open()) {
+                csv_file << std::fixed; // evita notación científica
 
+                csv_file << e->ts << ","                  // timestamp (entero)
+                        << e->pid << ","                // pid (entero)
+                        << e->comm << ","               // nombre del proceso
+                        << st.r_bytes << ","            // bytes recibidos (entero)
+                        << st.s_bytes << ",";           // bytes enviados (entero)
 
+                // r_rate y s_rate con 2 decimales
+                csv_file << std::setprecision(2)
+                        << r_rate << "," << s_rate << ",";
+
+                // el resto sin decimales
+                csv_file << std::setprecision(0)
+                        << (e->protocol == IPPROTO_TCP ? "TCP" : "UDP") << ","
+                        << iface.c_str() << ","
+                        << inet_ntoa(*(struct in_addr*)&e->saddr) << "," << e->sport << ","
+                        << inet_ntoa(*(struct in_addr*)&e->daddr) << "," << e->dport
+                        << "\n";
+                    }
 
 
     
@@ -222,7 +287,7 @@ void stats_loop() {
     auto next = start;
 
     while (true) {
-        next += std::chrono::seconds(5);
+        next += std::chrono::seconds(1);
         std::this_thread::sleep_until(next);
 
         unsigned long long ts = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -328,6 +393,9 @@ int main(int argc, char **argv) {
         perf_buffer__poll(pb, 100);
     }
     print_summary();
+    if (csv_file.is_open()) {
+        csv_file.close();
+    }
     perf_buffer__free(pb);
     net_trace_bpf__destroy(skel);
     return 0;
