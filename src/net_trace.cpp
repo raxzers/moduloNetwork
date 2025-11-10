@@ -76,10 +76,10 @@ void init_csv() {
     time_t now = time(nullptr);
     struct tm *lt = localtime(&now);
     char filename[64];
-    strftime(filename, sizeof(filename), "build/measurements_%Y%m%d_%H%M.csv", lt);
+    strftime(filename, sizeof(filename), "processed_data/measurements_%Y%m%d_%H%M.csv", lt);
     csv_file << std::fixed << std::setprecision(0);
     csv_file.open(filename);
-    csv_file << "timestamp,pid,process,recv_bytes,sent_bytes,recv_rate,sent_rate,protocol,iface,src_ip,src_port,dst_ip,dst_port\n";
+    csv_file << "TIMESTAMP,PID,COMM,RECV_BYTES,SENT_BYTES,RECV_RATE,SENT_RATE,PROTOCOL,IFACE,SRC_IP,SRC_PORT,DST_IP,DST_PORT,TOTAL_RECV_BYTES,TOTAL_SENT_BYTES\n";
     csv_initialized = true;
 }
 
@@ -171,7 +171,7 @@ static void print_summary() {
     time_t now = time(nullptr);
     struct tm *lt = localtime(&now);
     std::ostringstream filename;
-    filename << "build/report"
+    filename << "processed_data/report"
              << std::put_time(lt, "%Y%m%d_%H%M")
              << ".txt";
 
@@ -238,20 +238,17 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
 
     std::string iface=getActiveInterfaceName();
     // imprimir antes de actualizar snapshots
-    printf("[%llu] %-20s Recv=%llu Sent=%llu Rate: IN=%.2f B/ns OUT=%.2f B/s (built-upR=%llu built-upS=%llu %s) proto=%s iface=%s %s:%d -> %s:%d\n",
+    printf("[%llu] COMM:%-20s Recv=%llu Sent=%llu Rate: IN=%.2fb/ns OUT=%.2fb/ns (%s) Proto=%s IFACE=%s \n",
            e->ts,
            key.c_str(),
            st.r_bytes,
            st.s_bytes,
            r_rate,
            s_rate,
-           st.total_r_bytes,
-           st.total_s_bytes,
            e->direction ? "OUT" : "IN",
            e->protocol == IPPROTO_TCP ? "TCP" : "UDP",
-           iface.c_str(),
-           inet_ntoa(*(struct in_addr*)&e->saddr), e->sport,
-           inet_ntoa(*(struct in_addr*)&e->daddr), e->dport);
+           iface.c_str()
+    );
 
     //printf("direction=%u protocol=%u\n", e->direction, e->protocol);
     // Guardar en CSV
@@ -273,7 +270,9 @@ static void print_process(net_event* e, ProcStats &st,std::string key) {
                         << (e->protocol == IPPROTO_TCP ? "TCP" : "UDP") << ","
                         << iface.c_str() << ","
                         << inet_ntoa(*(struct in_addr*)&e->saddr) << "," << e->sport << ","
-                        << inet_ntoa(*(struct in_addr*)&e->daddr) << "," << e->dport
+                        << inet_ntoa(*(struct in_addr*)&e->daddr) << "," << e->dport << ","
+                        << st.total_r_bytes << ","
+                        << st.total_s_bytes 
                         << "\n";
                     }
 

@@ -4,6 +4,7 @@ LIBBPF_DIR ?= /usr/lib/bpf
 CFLAGS = -O2 -g -Wall -m64 -I$(LIBBPF_DIR)/include -I./src
 
 BUILD_DIR := build
+PROC_DIR := processed_data
 SRC_DIR := src
 BPF_OBJS   = $(BUILD_DIR)/net_trace.bpf.o
 USER_OBJS  = $(BUILD_DIR)/net_trace
@@ -15,6 +16,7 @@ all: $(USER_OBJS)
 # Asegurar que build/ exista
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+	mkdir -p $(PROC_DIR)
 
 # Generar vmlinux.h automáticamente
 $(VMLINUX_H): | $(BUILD_DIR)
