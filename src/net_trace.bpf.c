@@ -55,10 +55,8 @@ struct {
 
 // ---- mapa perf buffer ----
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(__u32));
-    __uint(value_size, sizeof(__u32));
-    __uint(max_entries, 1024);
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20); 
 } events SEC(".maps");
 
 
@@ -126,18 +124,24 @@ static __always_inline void fill_event(struct net_event *ev, struct sock *sk,
 SEC("kprobe/tcp_sendmsg")
 int BPF_KPROBE(trace_tcp_sendmsg, struct sock *sk, struct msghdr *msg, size_t size) {
     if (!sk || size == 0) return 0;
-    struct net_event ev = {};
-    fill_event(&ev, sk, size, 1, IPPROTO_TCP);
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &ev, sizeof(ev));
+    struct net_event *ev;
+    ev = bpf_ringbuf_reserve(&events, sizeof(struct net_event), 0);
+    if (!ev)
+        return 0;
+    fill_event(ev, sk, size, 1, IPPROTO_TCP);
+    bpf_ringbuf_submit(ev, 0);
     return 0;
 }
 
 SEC("kprobe/tcp_cleanup_rbuf")
 int BPF_KPROBE(trace_tcp_cleanup_rbuf, struct sock *sk, int copied) {
     if (!sk || copied <= 0) return 0;
-    struct net_event ev = {};
-    fill_event(&ev, sk, copied, 0, IPPROTO_TCP);
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &ev, sizeof(ev));
+    struct net_event *ev;
+    ev = bpf_ringbuf_reserve(&events, sizeof(struct net_event), 0);
+    if (!ev)
+        return 0;
+    fill_event(ev, sk, copied, 0, IPPROTO_TCP);
+     bpf_ringbuf_submit(ev, 0);
     return 0;
 }
 
@@ -145,18 +149,24 @@ int BPF_KPROBE(trace_tcp_cleanup_rbuf, struct sock *sk, int copied) {
 SEC("kprobe/udp_sendmsg")
 int BPF_KPROBE(trace_udp_sendmsg, struct sock *sk, struct msghdr *msg, size_t size) {
     if (!sk || size == 0) return 0;
-    struct net_event ev = {};
-    fill_event(&ev, sk, size, 1, IPPROTO_UDP);
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &ev, sizeof(ev));
+    struct net_event *ev;
+    ev = bpf_ringbuf_reserve(&events, sizeof(struct net_event), 0);
+    if (!ev)
+        return 0;
+    fill_event(ev, sk, size, 1, IPPROTO_TCP);
+    bpf_ringbuf_submit(ev, 0);
     return 0;
 }
 
 SEC("kprobe/udp_recvmsg")
 int BPF_KPROBE(trace_udp_recvmsg, struct sock *sk, struct msghdr *msg, size_t size) {
-    if (!sk || (long)size <= 0) return 0;
-    struct net_event ev = {};
-    fill_event(&ev, sk, size, 0, IPPROTO_UDP);
-    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &ev, sizeof(ev));
+    if (!sk || size == 0) return 0;
+    struct net_event *ev;
+    ev = bpf_ringbuf_reserve(&events, sizeof(struct net_event), 0);
+    if (!ev)
+        return 0;
+    fill_event(ev, sk, size, 1, IPPROTO_TCP);
+    bpf_ringbuf_submit(ev, 0);
     return 0;
 }
 

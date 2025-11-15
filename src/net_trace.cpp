@@ -24,7 +24,6 @@
 
 #include <sstream>
 
-
 static volatile bool running = true;
 
 static void sig_handler(int signo) {
@@ -69,6 +68,9 @@ struct ProcStats {
 
 std::ofstream csv_file;
 bool csv_initialized = false;
+
+
+
 
 void init_csv() {
     if (csv_initialized) return;
@@ -298,7 +300,7 @@ void stats_loop() {
 
 
 
-static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
+static void process_event( void *data) {
     struct net_event *e = (struct net_event *) data;
 
     char keybuf[64];
@@ -346,6 +348,7 @@ static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
         else
             bw.sent_bytes_window += delta;
     }
+
 }
 
 
@@ -377,25 +380,48 @@ int main(int argc, char **argv) {
         std::thread(stats_loop).detach();
     }
 
-    struct perf_buffer *pb = perf_buffer__new(bpf_map__fd(skel->maps.events),
-                                              8, handle_event, handle_lost, nullptr, nullptr);
-    if (!pb) {
-        std::cerr << "Failed to open perf buffer\n";
-        net_trace_bpf__destroy(skel);
+    auto handle_event = [](void *ctx, void *data, size_t size) {
+        
+
+            process_event(data);
+        
+        return 0;
+    };
+    struct ring_buffer *rb;
+
+    // Asume que ya cargaste tu skeleton
+    // skel = monitor_bpf__open_and_load();
+
+    int map_fd = bpf_map__fd(skel->maps.events);
+
+    rb = ring_buffer__new(
+        map_fd,
+        handle_event,   // callback
+        NULL,           // ctx
+        NULL            // opts
+    );
+
+    if (!rb) {
+        fprintf(stderr, "Error creando ring buffer\n");
         return 1;
     }
+    
 
     std::cout << "Tracing... Press Ctrl+C to stop\n";
 
     while (running) {
         
-        perf_buffer__poll(pb, 100);
+        int err = ring_buffer__poll(rb, 100 /* timeout ms */);
+        if (err < 0) {
+            fprintf(stderr, "Error en ring_buffer__poll: %d\n", err);
+            break;
+        }
     }
     print_summary();
     if (csv_file.is_open()) {
         csv_file.close();
     }
-    perf_buffer__free(pb);
+    ring_buffer__free(rb);
     net_trace_bpf__destroy(skel);
     return 0;
 }

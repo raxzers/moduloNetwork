@@ -3,3 +3,4 @@
 /build
 src/vmlinux.h
 src/net_trace.skel.h
+/processed_data
