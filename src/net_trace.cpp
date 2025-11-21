@@ -413,7 +413,7 @@ int main(int argc, char **argv) {
         
         int err = ring_buffer__poll(rb, 100 /* timeout ms */);
         if (err < 0) {
-            fprintf(stderr, "Error en ring_buffer__poll: %d\n", err);
+            //fprintf(stderr, "Error en ring_buffer__poll: %d\n", err);
             break;
         }
     }
