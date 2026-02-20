@@ -1,0 +1,13 @@
+option(
+  'libbpf_include_dir',
+  type: 'string',
+  value: '/usr/include',
+  description: 'Ruta de headers de libbpf'
+)
+
+option(
+  'libbpf_lib_dir',
+  type: 'string',
+  value: '/usr/lib',
+  description: 'Ruta de librería libbpf'
+)
